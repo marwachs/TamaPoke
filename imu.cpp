@@ -43,6 +43,15 @@ void imuBegin(bool enable) {
   writeReg(0x08, 0x01);          // CTRL7: accelerometer only
 }
 
+static int16_t restX = 0, restY = 0, restZ = 0;
+static bool haveRest = false;
+static uint8_t awayHits = 0;
+
+void imuRearm() {
+  haveRest = false;
+  awayHits = 0;
+}
+
 bool imuRaised() {
   if (!gAddr) return false;
   static uint32_t last = 0;
@@ -54,17 +63,26 @@ bool imuRaised() {
   int16_t ax = (int16_t)(raw[0] | (raw[1] << 8));
   int16_t ay = (int16_t)(raw[2] | (raw[3] << 8));
   int16_t az = (int16_t)(raw[4] | (raw[5] << 8));
-  static int16_t px, py, pz;
-  static bool have = false;
-  int32_t dot = (int32_t)ax * px + (int32_t)ay * py + (int32_t)az * pz;
   int32_t m1 = (int32_t)ax * ax + (int32_t)ay * ay + (int32_t)az * az;
-  int32_t m2 = (int32_t)px * px + (int32_t)py * py + (int32_t)pz * pz;
-  px = ax; py = ay; pz = az;
-  if (!have) { have = true; return false; }
-  // ~1 g on the ±4 g scale is 8192 counts. Ignore free-fall and the first garbage sample.
-  if (m1 < 20000000 || m2 < 20000000) return false;
-  // cos(theta) < 0.85 (about 32 degrees) counts as a lift.
+  // ~1 g on the ±4 g scale is 8192 counts. Ignore free-fall and a garbage sample.
+  if (m1 < 20000000) { awayHits = 0; return false; }
+  if (!haveRest) {
+    restX = ax; restY = ay; restZ = az;
+    haveRest = true;
+    awayHits = 0;
+    return false;
+  }
+  int32_t dot = (int32_t)ax * restX + (int32_t)ay * restY + (int32_t)az * restZ;
+  int32_t m2 = (int32_t)restX * restX + (int32_t)restY * restY + (int32_t)restZ * restZ;
+  if (m2 < 20000000) { haveRest = false; awayHits = 0; return false; }
+  // cos(theta) < 0.85 (about 32 degrees) from the pose captured at screen-off.
+  // Two samples in a row, so one noisy read cannot turn the panel back on.
   int64_t lhs = (int64_t)dot * dot;
   int64_t rhs = (int64_t)m1 * m2 * 72 / 100;
-  return lhs < rhs;
+  if (lhs < rhs) {
+    if (awayHits < 2) awayHits++;
+  } else {
+    awayHits = 0;
+  }
+  return awayHits >= 2;
 }
