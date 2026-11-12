@@ -8,6 +8,12 @@ Updating from the [web installer](https://socquique.github.io/TamaPoke/web/)
 
 ## [Unreleased]
 
+### Fixed
+
+- **AXP2101 DCDC5 off on the 1.75C.** On that schematic the converter is
+  unconnected (no inductor, output capacitor not fitted). DCDC1 stays on: it
+  is VCC3V3 for the ESP32 and the panel. The original 1.75 is unchanged.
+
 ### Added
 
 - **Waveshare ESP32-S3-Touch-AMOLED-1.75C** (experimental community support):
