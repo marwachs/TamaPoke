@@ -23,3 +23,4 @@ bool usbPresentNow();             // sin cache (una lectura I2C): para decidir s
 // la pulsacion corta la captura el firmware (pantalla on/off)
 void pwrSetup();
 bool pwrShortPressed();  // sondear en el loop (1.75C: siempre false, triple press en screenlock.h)
+void batLogIrqs();       // charge / VBUS edges, for the debug log

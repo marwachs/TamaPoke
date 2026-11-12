@@ -31,6 +31,7 @@
 #include "audio.h"
 #include "blit.h"
 #include "power.h"
+#include "diag.h"
 #include "bootbutton.h"
 #include "screenlock.h"
 #include "trainingcapture.h"
@@ -304,6 +305,7 @@ void pollPwrButton() {
     galleryDirty = true;
     lastInteract = millis();
     Serial.println("PWR triple: Locked");
+    diagInfo("screen lock on");
   } else {
     if (panelSleeping) {
       panel->displayOn();  // CO5300 DISPON + SLPOUT, library's 120 ms delays
@@ -316,6 +318,7 @@ void pollPwrButton() {
     gTouchIrq = true;  // one initial sample: swallow any finger held through unlock
     showControlToast("Unlocked");
     Serial.println("PWR triple: Unlocked");
+    diagInfo("screen lock off");
   }
 #else
   // Keep the original board's PEK short-press behaviour unchanged.
@@ -340,6 +343,7 @@ void updateScreenLock(uint32_t now) {
     panel->displayOff();  // CO5300 DISPOFF (0x28), SLPIN (0x10); NOT shared DCDC1
     panelSleeping = true;
     Serial.println("Screen lock: CO5300 off/asleep; touch and BOOT ignored");
+    diagInfo("panel sleep");
   }
 #endif
 }
@@ -351,6 +355,7 @@ void setup() {
   // monitor serie abierto en el host (el bufer TX del USB CDC se llena
   // y nadie lo vacia) -> con timeout 0 los mensajes se descartan
   Serial.setTxTimeoutMs(0);
+  diagBoot();
   Serial.printf("TamaPoke fw v%s (%s)\n", FW_VERSION, BOARD_NAME);
   loadLang();  // idioma guardado (ES por defecto)
   Wire.begin(IIC_SDA, IIC_SCL);
@@ -367,7 +372,7 @@ void setup() {
 
   // QSPI a 80MHz (por defecto 40): el flush del framebuffer es el cuello de
   // botella del fps (~56ms a 40MHz). Si el panel mostrara basura, bajar a 40M.
-  if (!gfx->begin(80000000)) Serial.println("gfx->begin() fallo");
+  if (!gfx->begin(80000000)) diagError("display begin failed");
   {  // nivel de brillo guardado (ajustes)
     Preferences p;
     p.begin("tamapoke", true);
@@ -454,6 +459,8 @@ void ensureMon() {
 }
 
 void loop() {
+  diagFeedWdt();
+  batLogIrqs();
   uint32_t now = millis();
   pet.update(now);
 
@@ -521,21 +528,24 @@ void loop() {
     if (e) pet.lastSeenEpoch = e;
   }
 
-  // latido de salud cada 5 min (para el soak test; se descarta si no hay monitor)
+  // 10 s heartbeat (heap, PSRAM, stack watermark, battery, fps). Silent when the
+  // settings log switch is off, or when built with TAMAPOKE_LOG < 2.
   static uint32_t lastHealth = 0;
-  if (now - lastHealth > 300000) {
+  if (now - lastHealth > 10000) {
     lastHealth = now;
+    DiagBeat beat;
+    beat.batPct = batPercent();
+    beat.mv = batMillivolts();
+    beat.charging = batCharging();
+    beat.usb = usbPresent();
+    beat.dim = dimStage;
+    beat.screenOff = screenOff;
 #if BOARD_AMOLED_175C
-    Serial.printf("HEALTH up=%lus heap=%u min=%u bat=%d%% mv=%d chg=%d usb=%d dim=%u off=%d locked=%d\n",
-                  (unsigned long)(now / 1000), ESP.getFreeHeap(), ESP.getMinFreeHeap(),
-                  batPercent(), batMillivolts(), batCharging() ? 1 : 0,
-                  usbPresent() ? 1 : 0, dimStage, screenOff ? 1 : 0, screenIsLocked() ? 1 : 0);
+    beat.locked = screenIsLocked();
 #else
-    Serial.printf("HEALTH up=%lus heap=%u min=%u bat=%d%% mv=%d chg=%d usb=%d dim=%u off=%d\n",
-                  (unsigned long)(now / 1000), ESP.getFreeHeap(), ESP.getMinFreeHeap(),
-                  batPercent(), batMillivolts(), batCharging() ? 1 : 0,
-                  usbPresent() ? 1 : 0, dimStage, screenOff ? 1 : 0);
+    beat.locked = false;
 #endif
+    diagHeartbeat(beat);
   }
 
   // Ritmo de dibujo (power.h): 10 fps con el bicho en uso, menos cuanto mas rato sin tocar,
@@ -554,6 +564,7 @@ void loop() {
   if (interval && now - lastRender >= interval) {
     lastRender = now;
     drewFrame = render();
+    if (drewFrame) diagNoteFrame();
 #if BOARD_AMOLED_175C
     // renderSack's capture worker has joined: only the loop changes hits/UI.
     if (sackOpen && !screenIsLocked()) drainTrainingTouch();
@@ -2093,8 +2104,8 @@ void renderClock() {
   printT(T(S_CLOCK_CANCEL));
 
   // version del firmware (discreta, abajo del todo)
-  char ver[20];
-  snprintf(ver, sizeof(ver), "TamaPoke v%s", FW_VERSION);
+  char ver[28];
+  snprintf(ver, sizeof(ver), "v%s  %s", FW_VERSION, diagRuntimeOn() ? "LOG" : "log");
   setSize(1);
   setCur(centerX(ver, 1), 436);
   printT(ver);
@@ -2102,6 +2113,10 @@ void renderClock() {
 }
 
 void clockTap(int16_t x, int16_t y) {
+  if (y >= 424) {  // version line: runtime debug log
+    diagSetRuntime(!diagRuntimeOn());
+    return;
+  }
   if (y >= 190 && y <= 248) {  // fila de botones +/-
     if (x >= 104 && x < 162) clockH = (clockH + 23) % 24;
     else if (x >= 170 && x < 228) clockH = (clockH + 1) % 24;
@@ -2928,7 +2943,8 @@ uint8_t pmdFrameAt(const PmdAct &a, uint32_t t, bool loop) {
 // dibuja una accion de un PmdMon concreto (m); drawPmdAct usa el global pmd
 void drawPmdActM(PmdMon &m, uint8_t actId, int cx, int groundY, uint32_t t, bool loop, bool sil, uint8_t maxS) {
   const PmdAct &a = m.acts[actId];
-  if (!a.frames) return;
+  // A missing or truncated sprite must not walk off the palette or the blob.
+  if (!a.frames || !a.data || !a.w || !a.h) return;
   uint8_t sBase = m.acts[PMD_IDLE].h ? 170 / m.acts[PMD_IDLE].h : 5;
   if (sBase < 2) sBase = 2;
   if (sBase > maxS) sBase = maxS;
@@ -2942,7 +2958,10 @@ void drawPmdActM(PmdMon &m, uint8_t actId, int cx, int groundY, uint32_t t, bool
   for (int r = 0; r < a.h; r++) {
     const uint8_t *row = fr + r * a.w;
     forRuns(a.w, [&](int c) { return indexedKey(row[c], sil); },
-            [&](int c0, int len, int k) { gfx->fillRect(x0 + c0 * s, y0 + r * s, len * s, s, sil ? INK_K : m.pal[k]); });
+            [&](int c0, int len, int k) {
+              if (!sil && (k < 0 || (uint16_t)k >= m.palCount)) return;
+              gfx->fillRect(x0 + c0 * s, y0 + r * s, len * s, s, sil ? INK_K : m.pal[k]);
+            });
   }
 }
 void drawPmdAct(uint8_t actId, int cx, int groundY, uint32_t t, bool loop, bool sil, uint8_t maxS) {

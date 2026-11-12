@@ -1,4 +1,5 @@
 #include "sdmon.h"
+#include "diag.h"
 #include "pin_config.h"
 #include <FS.h>
 #if BOARD_AMOLED_175C
@@ -24,7 +25,7 @@ bool PmdMon::load(uint8_t dexNum, bool shiny) {
     snprintf(path, sizeof(path), "/mons/p%03u.bin", dexNum);
     f = SpriteFS.open(path, FILE_READ);
   }
-  if (!f) return false;
+  if (!f) { diagInfo("sprite missing"); return false; }
 
   uint32_t size = f.size();
   if (size < 7 || size > 3UL * 1024 * 1024) { f.close(); return false; }
@@ -160,6 +161,7 @@ bool sdBegin() {
     LittleFS.mkdir("/mons");
   } else {
     Serial.println("LittleFS no montado (flashea tools/flash_175c.sh --fs o el .img)");
+    diagError("LittleFS not mounted");
   }
 #else
   SD_MMC.setPins(SDMMC_CLK, SDMMC_CMD, SDMMC_DATA);
@@ -169,6 +171,7 @@ bool sdBegin() {
     SD_MMC.mkdir("/mons");
   } else {
     Serial.println("SD no detectada (el juego usa los sprites de flash)");
+    diagError("microSD not mounted");
   }
 #endif
   return sdReady;
@@ -188,6 +191,7 @@ bool SdMon::load(uint8_t dexNum, bool shiny) {
   }
   if (!f) {
     Serial.printf("no existe %s\n", path);
+    diagInfo("sprite missing");
     return false;
   }
 

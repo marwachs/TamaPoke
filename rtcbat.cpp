@@ -1,4 +1,5 @@
 #include "batcurve.h"
+#include "diag.h"
 #include "rtcbat.h"
 #include "pin_config.h"  // define XPOWERS_CHIP_AXP2101
 #include <Wire.h>
@@ -166,6 +167,10 @@ void pwrSetup() {
     if (!pmu.setPowerKeyPressOffTime(XPOWERS_POWEROFF_4S))
       Serial.println("PWR: could not set AXP 4s shutdown; check PMU");
     pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
+    pmu.enableIRQ(XPOWERS_AXP2101_VBUS_INSERT_IRQ | XPOWERS_AXP2101_VBUS_REMOVE_IRQ |
+                  XPOWERS_AXP2101_BAT_INSERT_IRQ | XPOWERS_AXP2101_BAT_REMOVE_IRQ |
+                  XPOWERS_AXP2101_BAT_CHG_START_IRQ | XPOWERS_AXP2101_BAT_CHG_DONE_IRQ |
+                  XPOWERS_AXP2101_BAT_OVER_VOL_IRQ);
     pmu.clearIrqStatus();
   }
   // SYS_OUT is already pulled up on the board (R9). High = PWR held.
@@ -174,7 +179,30 @@ void pwrSetup() {
   if (!pmuOk) return;
   pmu.setPowerKeyPressOffTime(XPOWERS_POWEROFF_4S);
   pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
-  pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ);
+  pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ |
+                XPOWERS_AXP2101_VBUS_INSERT_IRQ | XPOWERS_AXP2101_VBUS_REMOVE_IRQ |
+                XPOWERS_AXP2101_BAT_INSERT_IRQ | XPOWERS_AXP2101_BAT_REMOVE_IRQ |
+                XPOWERS_AXP2101_BAT_CHG_START_IRQ | XPOWERS_AXP2101_BAT_CHG_DONE_IRQ |
+                XPOWERS_AXP2101_BAT_OVER_VOL_IRQ);
+  pmu.clearIrqStatus();
+#endif
+}
+
+void batLogIrqs() {
+#if TAMAPOKE_LOG >= 2
+  if (!pmuOk || !diagRuntimeOn()) return;
+  pmu.getIrqStatus();
+  if (pmu.isVbusInsertIrq()) diagInfo("PMU VBUS in");
+  if (pmu.isVbusRemoveIrq()) diagInfo("PMU VBUS out");
+  if (pmu.isBatInsertIrq()) diagInfo("PMU battery in");
+  if (pmu.isBatRemoveIrq()) diagInfo("PMU battery out");
+  if (pmu.isBatChargeStartIrq()) diagInfo("PMU charge start");
+  if (pmu.isBatChargeDoneIrq()) diagInfo("PMU charge done");
+  if (pmu.isBatOverVoltageIrq()) diagError("PMU battery over-voltage");
+#if !BOARD_AMOLED_175C
+  // Leave a short press latched so pwrShortPressed() can see it and clear.
+  if (pmu.isPekeyShortPressIrq() || pmu.isPekeyLongPressIrq()) return;
+#endif
   pmu.clearIrqStatus();
 #endif
 }
