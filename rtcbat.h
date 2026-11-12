@@ -22,5 +22,5 @@ bool usbPresentNow();             // sin cache (una lectura I2C): para decidir s
 // boton PWR del AXP2101: pulsacion larga 4s = apagado fisico (RTC sigue vivo);
 // la pulsacion corta la captura el firmware (pantalla on/off)
 void pwrSetup();
-bool pwrShortPressed();  // sondear en el loop (1.75C: siempre false, triple press en screenlock.h)
+bool pwrShortPressed();  // AXP2101 PKEY short IRQ, both boards (latched until cleared)
 void batLogIrqs();       // charge / VBUS edges, for the debug log
