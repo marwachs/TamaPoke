@@ -197,7 +197,7 @@ uint32_t lastRender = 0;
 uint32_t sdEpoch = 0;  // +1 cada vez que se recarga la SD (las miniaturas cambian)
 // proteccion del AMOLED: atenuado por inactividad
 uint32_t lastInteract = 0;
-uint8_t dimStage = 0;        // 0 despierto, 1 atenuado (90s), 2 casi apagado (5min)
+uint8_t dimStage = 0;        // 0 despierto, 1 atenuado, 2 casi apagado (sigue el timeout de power.h)
 bool swallowGesture = false; // el toque que despierta no acciona nada
 uint32_t holdStart = 0;     // pulsacion larga sobre el bicho
 uint32_t confirmUntil = 0;  // dialogo "soltar?" activo hasta este millis
@@ -392,6 +392,11 @@ void setup() {
     powerRaiseWake = p.getBool("imu", true);
     p.end();
   }
+  if (powerOffMs)
+    Serial.printf("screen-off %lu s (USB does not disable it; dims at half)\n",
+                  (unsigned long)(powerOffMs / 1000));
+  else
+    Serial.println("screen-off never (USB does not disable it)");
   imuBegin(powerRaiseWake);
   panel->setBrightness(180);
   applyLangFont();  // fuente del idioma guardado (clasica salvo CJK)
@@ -510,12 +515,19 @@ void loop() {
 #endif
 
   updateBrightness(now);
-  // Apagado solo por inactividad. Un toque (handleTouch) lo enciende y pone idle a 0.
-  if (!screenOff && autoScreenOff(powerCtx(now)) && !clockOpen && !kbOpen && !galleryOpen &&
-      !pet.evolving() && !pet.ceremony) {
+  // Apagado por inactividad en cualquier pantalla, tambien el reloj (es estatica:
+  // fps 0 no significa que el temporizador este parado). El minijuego queda fuera
+  // en autoScreenOff. El USB no lo desactiva: solo impide el light sleep.
+  if (!screenOff && autoScreenOff(powerCtx(now)) && !pet.evolving() && !pet.ceremony) {
     screenOff = true;
+    Serial.printf("screen off: idle %lu ms, timeout %lu ms, usb=%d\n",
+                  (unsigned long)idleSince(now, lastInteract),
+                  (unsigned long)powerOffMs, usbPresent() ? 1 : 0);
   }
   applyCpu(powerCtx(now));
+  static bool wasScreenOff = false;
+  if (screenOff && !wasScreenOff) imuRearm();
+  wasScreenOff = screenOff;
   if (powerRaiseWake && screenOff && imuRaised()) {
     screenOff = false;
     wakeUI();
@@ -634,11 +646,11 @@ void updateBrightness(uint32_t now) {
 #endif
   // los eventos visibles despiertan la pantalla solos
   if (!screenOff && (pet.evolving() || pet.ceremony || pet.eating() || pet.showHeart())) {
-    if (dimStageFor(idleSince(now, lastInteract)) != DIM_AWAKE) wakeUI();
+    if (dimStageNow(powerCtx(now)) != DIM_AWAKE) wakeUI();
     else lastInteract = now;
   }
   PowerCtx c = powerCtx(now);
-  dimStage = dimStageFor(c.idleMs);
+  dimStage = dimStageNow(c);
   uint8_t target = brightnessFor(c);
   if (target != panelBrightness) {
     panelBrightness = target;
