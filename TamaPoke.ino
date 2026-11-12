@@ -2595,6 +2595,14 @@ void drawBattery() {
     int fw = (w - 4) * pc / 100;
     if (fw > 0) gfx->fillRect(x + 2, y + 2, fw, h - 4, col);
   }
+  // The bolt covers the fill, so the number is the percent in both states.
+  // A leading + means the charger is on. It sits under the icon, inside the round glass.
+  char pct[8];
+  snprintf(pct, sizeof(pct), charging ? "+%d%%" : "%d%%", pc);
+  gfx->setTextColor(col);
+  setSize(1);
+  setCur(x + (int)w / 2 - (int)textW(pct, 1) / 2, y + h + 2);
+  printT(pct);
 }
 
 void drawHeader(const char *name, uint16_t nameColor, const char *msg) {

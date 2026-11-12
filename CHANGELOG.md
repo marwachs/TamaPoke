@@ -10,6 +10,13 @@ Updating from the [web installer](https://socquique.github.io/TamaPoke/web/)
 
 ### Added
 
+- **LiPo charge profile on the AXP2101** (both boards). Charging is enabled at
+  4.20 V / 400 mA (50 mA precharge, 25 mA termination, 500 mA USB input limit),
+  matching Waveshare's 1.75C example and the 4.2 V cell in `batcurve.h`. The
+  header prints the percent under the icon, with a `+` while charging. The
+  existing low-battery save-and-shutdown (under 3.30 V for 30 s, PMU cutoff
+  3.10 V) is unchanged.
+
 - **Waveshare ESP32-S3-Touch-AMOLED-1.75C** (experimental community support):
   build with `tools/build_175c.sh` (`-DBOARD_AMOLED_175C=1` plus
   `boards/175c/partitions.csv`). Sprites come from a LittleFS partition in flash
