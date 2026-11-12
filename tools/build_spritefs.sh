@@ -3,8 +3,10 @@
 # (boards/175c/partitions.csv "storage" partition, 0x1CE0000 bytes at 0x310000).
 #
 # The full pack (151 normal + 151 shiny + thumbs) is ~41.7 MB and will not
-# fit in 32 MB flash. This script packs the 151 normal sprites + thumbs.bin
-# (~21.0 MB). Missing shiny files fall back to the normal sprite in firmware.
+# fit in 32 MB flash. This script packs the 151 normal sprites + thumbs.bin,
+# then as many shinies from tools/shiny_175c.txt as fit (most popular first),
+# leaving SAFETY_MARGIN bytes of the partition free. A shiny that does not
+# fit is omitted; the firmware falls back to the normal sprite.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -15,6 +17,9 @@ OUT="${1:-${ROOT}/tools/build/storage.littlefs.bin}"
 IMG_SIZE=$((0x1CE0000))
 BLOCK=4096
 PAGE=256
+# Left free for LittleFS metadata beyond the estimate, and for a shiny sent later over USB.
+SAFETY_MARGIN="${SAFETY_MARGIN:-$((512 * 1024))}"
+SHINY_LIST="${SHINY_LIST:-${ROOT}/tools/shiny_175c.txt}"
 
 MKLITTLEFS="${MKLITTLEFS:-}"
 if [[ -z "${MKLITTLEFS}" ]]; then
@@ -62,8 +67,11 @@ else
   echo "warning: thumbs.bin missing (gallery will have no thumbnails)" >&2
 fi
 
+[[ -f "$SHINY_LIST" ]] || { echo "Missing shiny list $SHINY_LIST" >&2; exit 1; }
+python3 "${ROOT}/tools/select_shinies.py" "$SRC" "$STAGING" "$SHINY_LIST" "$IMG_SIZE" "$SAFETY_MARGIN" "$BLOCK"
+
 bytes=$(du -sb "$STAGING" | awk '{print $1}')
-echo "Staging ${copied} sprites + thumbs, ${bytes} bytes raw (limit ${IMG_SIZE})"
+echo "Staging ${copied} normal sprites + thumbs + shinies, ${bytes} bytes raw (limit ${IMG_SIZE})"
 if (( bytes >= IMG_SIZE )); then
   echo "Pack is larger than the LittleFS partition" >&2
   exit 1

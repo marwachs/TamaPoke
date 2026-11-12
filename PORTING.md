@@ -99,11 +99,12 @@ partition table, which is harmless when they're unchanged but isn't app-only.
 
 The repo pack at `tools/sdcard/mons/` is about **41.7 MB** with shinies and
 **21.0 MB** for the 151 normal sprites plus `thumbs.bin`. That can't fit next to
-a 3 MB app in 32 MB, so the 1.75C image (`tools/build_spritefs.sh`) holds **all
-151 normal sprites and `thumbs.bin`** in the 28.875 MB `storage` partition.
-Shiny forms fall back to the normal sprite (the firmware already did that when a
-shiny file was missing). Roughly 7 MB is left for individual shiny files sent
-over USB with `tools/send_sd.py`.
+a 3 MB app in 32 MB. `tools/build_spritefs.sh` always packs the 151 normal
+sprites and `thumbs.bin`, then adds shinies from `tools/shiny_175c.txt` (most
+popular first) until the next one would cross a 512 KiB safety margin inside
+the 28.875 MB `storage` partition. A shiny that is not in the image falls back
+to the normal sprite. Leftover space can still take individual files over USB
+with `tools/send_sd.py`.
 
 `sdBegin()` mounts LittleFS at `/littlefs` (label `storage`) and **does not
 auto-format**: a failed mount means the image hasn't been flashed yet. Paths
