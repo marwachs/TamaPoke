@@ -32,6 +32,9 @@
 #include "blit.h"
 #include "power.h"
 #include "diag.h"
+#include "imu.h"
+#include <WiFi.h>
+#include <esp_bt.h>
 #include "bootbutton.h"
 #include "screenlock.h"
 #include "trainingcapture.h"
@@ -82,6 +85,11 @@ int16_t galleryDetail = 0;  // dex en vista detalle, 0 = rejilla
 
 bool screenOff = false;       // original 1.75: single PWR; 1.75C: triple-press lock
 uint8_t userDim = 0;          // nivel de brillo de ajustes (power.h): 0 alto, 1 medio, 2 bajo
+uint32_t powerOffMs = 60000;  // 0 = nunca; por defecto 60 s
+bool powerIdleFps = true;
+bool powerLightSleep = true;
+bool powerCpuScale = true;
+bool powerRaiseWake = true;
 bool cardOpen = false;        // ficha del bicho (deslizar vertical)
 bool kbOpen = false;          // teclado para renombrar al bicho
 char nameBuf[12] = "";
@@ -359,6 +367,10 @@ void setup() {
   Serial.printf("TamaPoke fw v%s (%s)\n", FW_VERSION, BOARD_NAME);
   loadLang();  // idioma guardado (ES por defecto)
   Wire.begin(IIC_SDA, IIC_SCL);
+  WiFi.persistent(false);
+  WiFi.mode(WIFI_OFF);
+  if (esp_bt_controller_get_status() == ESP_BT_CONTROLLER_STATUS_ENABLED)
+    esp_bt_controller_disable();
   // CST9217 (tactil), AXP2101 (PMU) y PCF85063 (RTC) comparten este bus I2C.
   // Red de seguridad para PMU/RTC (SensorLib NO respeta este timeout en el
   // tactil; el cuelgue del tactil dormido se resuelve gateando por INT, ver
@@ -377,8 +389,15 @@ void setup() {
     Preferences p;
     p.begin("tamapoke", true);
     userDim = p.getUChar("bri", 0) % BRIGHT_LEVELS;
+    uint8_t offSel = p.getUChar("off", 2);
+    powerOffMs = offSel == 0 ? 15000UL : offSel == 1 ? 30000UL : offSel == 2 ? 60000UL : 0;
+    powerIdleFps = p.getBool("fps", true);
+    powerLightSleep = p.getBool("slp", true);
+    powerCpuScale = p.getBool("cpu", true);
+    powerRaiseWake = p.getBool("imu", true);
     p.end();
   }
+  imuBegin(powerRaiseWake);
   panel->setBrightness(180);
   applyLangFont();  // fuente del idioma guardado (clasica salvo CJK)
 
@@ -498,6 +517,16 @@ void loop() {
 #endif
 
   updateBrightness(now);
+  // Apagado solo por inactividad. Un toque (handleTouch) lo enciende y pone idle a 0.
+  if (!screenOff && autoScreenOff(powerCtx(now)) && !clockOpen && !kbOpen && !galleryOpen &&
+      !pet.evolving() && !pet.ceremony) {
+    screenOff = true;
+  }
+  applyCpu(powerCtx(now));
+  if (powerRaiseWake && screenOff && imuRaised()) {
+    screenOff = false;
+    wakeUI();
+  }
 
   // bateria al limite seguro (sin USB): se guarda la partida y se apaga el PMU antes de que la
   // celda baje mas; el RTC conserva la hora
@@ -589,6 +618,10 @@ PowerCtx powerCtx(uint32_t now) {
   c.charging = batCharging();
   c.batPct = batPercent();
   c.userDim = userDim;
+  c.offMs = powerOffMs;
+  c.fullFps = !powerIdleFps;
+  c.noSleep = !powerLightSleep;
+  c.cpuScale = powerCpuScale;
   return c;
 }
 
@@ -2025,6 +2058,40 @@ static void drawLevelBars(int x, int lit) {
   }
 }
 
+static const char *powerOffLabel() {
+  return powerOffMs == 15000 ? "15s" : powerOffMs == 30000 ? "30s" : powerOffMs == 60000 ? "60s" : "--";
+}
+
+static void savePowerPrefs() {
+  uint8_t sel = powerOffMs == 15000 ? 0 : powerOffMs == 30000 ? 1 : powerOffMs == 60000 ? 2 : 3;
+  Preferences p;
+  p.begin("tamapoke", false);
+  p.putUChar("off", sel);
+  p.putBool("fps", powerIdleFps);
+  p.putBool("slp", powerLightSleep);
+  p.putBool("cpu", powerCpuScale);
+  p.putBool("imu", powerRaiseWake);
+  p.end();
+}
+
+static void drawPowerChip(int x, int y, const char *label, bool on) {
+  gfx->fillRoundRect(x, y, 68, 24, 6, on ? UI_BAR_OK : UI_WHITE);
+  gfx->drawRoundRect(x, y, 68, 24, 6, UI_INK);
+  gfx->setTextColor(on ? UI_BG_DAY : UI_INK);
+  setSize(2);
+  setCur(x + (68 - textW(label, 2)) / 2, y + 5);
+  printT(label);
+}
+
+static void applyCpu(const PowerCtx &c) {
+  if (audioBusy()) return;  // the codec clock follows the CPU
+  uint32_t want = cpuMhzFor(c);
+  static uint32_t cur = 240;
+  if (want == cur) return;
+  setCpuFrequencyMhz(want);
+  cur = want;
+}
+
 void renderClock() {
   gfx->fillScreen(RGB565_BLACK);
   gfx->fillCircle(CX, CY, 231, UI_BG_DAY);
@@ -2092,10 +2159,17 @@ void renderClock() {
   setCur(LANG_PILL_X + (LANG_PILL_W - textW(lp, 2)) / 2, LANG_PILL_Y + 8);
   printT(lp);
 
-  gfx->fillRoundRect(133, 340, 200, 48, 14, UI_BAR_OK);
+  // fila de ahorro: timeout, fps en reposo, light sleep, CPU, levantar para despertar
+  drawPowerChip(36, 328, powerOffLabel(), true);
+  drawPowerChip(112, 328, powerIdleFps ? "FPS" : "fps", powerIdleFps);
+  drawPowerChip(188, 328, powerLightSleep ? "SLP" : "slp", powerLightSleep);
+  drawPowerChip(264, 328, powerCpuScale ? "CPU" : "cpu", powerCpuScale);
+  drawPowerChip(340, 328, powerRaiseWake ? "IMU" : "imu", powerRaiseWake);
+
+  gfx->fillRoundRect(133, 362, 200, 40, 14, UI_BAR_OK);
   gfx->setTextColor(UI_BG_DAY);
   setSize(3);
-  setCur(CX - 18, 352);
+  setCur(CX - 18, 372);
   printT("OK");
 
   gfx->setTextColor(UI_TRACK);
@@ -2153,7 +2227,21 @@ void clockTap(int16_t x, int16_t y) {
       return;
     }
   }
-  if (y >= 340 && y <= 388 && x >= 133 && x <= 333) { applyClock(); return; }
+  if (y >= 362 && y <= 402 && x >= 133 && x <= 333) { applyClock(); return; }
+  if (y >= 328 && y < 354) {
+    if (x >= 36 && x < 108) {
+      uint8_t sel = powerOffMs == 15000 ? 1 : powerOffMs == 30000 ? 2 : powerOffMs == 60000 ? 3 : 0;
+      powerOffMs = sel == 0 ? 15000UL : sel == 1 ? 30000UL : sel == 2 ? 60000UL : 0;
+      savePowerPrefs();
+    } else if (x >= 112 && x < 184) { powerIdleFps = !powerIdleFps; savePowerPrefs(); }
+    else if (x >= 188 && x < 260) { powerLightSleep = !powerLightSleep; savePowerPrefs(); }
+    else if (x >= 264 && x < 336) { powerCpuScale = !powerCpuScale; savePowerPrefs(); }
+    else if (x >= 340 && x < 430) {
+      powerRaiseWake = !powerRaiseWake;
+      savePowerPrefs();
+      imuBegin(powerRaiseWake);
+    }
+  }
 }
 
 // llama + numero de racha arriba a la izquierda

@@ -20,6 +20,26 @@ TEST(power, idleSince_no_desborda_si_el_toque_es_posterior_al_reloj_leido) {
   CHECK(idleSince(0x90000000u, 0) == 0x90000000u);       // 28 dias sin tocar: no se confunde con un toque futuro          // vuelta del reloj de 49 dias
 }
 
+TEST(power, un_timeout_de_apagado_atenua_a_la_mitad_y_apaga_al_cumplirse) {
+  PowerCtx c = ctx(0);
+  c.offMs = 60000;
+  CHECK_EQ((int)dimStageNow(c), (int)DIM_AWAKE);
+  c.idleMs = 30000;
+  CHECK_EQ((int)dimStageNow(c), (int)DIM_LOW);
+  c.idleMs = 60000;
+  CHECK_EQ((int)dimStageNow(c), (int)DIM_OFF);
+  CHECK(autoScreenOff(c));
+  c.gameOpen = true;
+  CHECK(!autoScreenOff(c));
+  c = ctx(0);
+  c.fullFps = true;
+  CHECK_EQ((int)frameIntervalMs(c), 100);
+  c.screenOff = true;
+  CHECK_EQ((int)cpuMhzFor(c), 240);  // cpuScale is off unless the firmware sets it
+  c.cpuScale = true;
+  CHECK_EQ((int)cpuMhzFor(c), 80);
+}
+
 TEST(power, los_escalones_de_atenuacion_son_los_de_siempre) {
   CHECK_EQ((int)dimStageFor(0), (int)DIM_AWAKE);
   CHECK_EQ((int)dimStageFor(90000), (int)DIM_AWAKE);

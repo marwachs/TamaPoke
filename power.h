@@ -24,6 +24,10 @@ struct PowerCtx {
   bool charging;
   int batPct;         // 0-100, -1 si no hay bateria
   uint8_t userDim;    // nivel de brillo elegido en ajustes: 0 = alto (el de siempre), 1 = medio, 2 = bajo
+  uint32_t offMs;     // 0 = el horario de siempre (atenua a 90 s, casi apagada a 5 min). Si no, apaga a este tiempo y atenua a la mitad
+  bool fullFps;       // true = no bajar los fps en reposo ni con poca bateria
+  bool noSleep;       // true = no light-sleep
+  bool cpuScale;      // true = bajar la CPU cuando no se usa
 };
 
 // niveles de brillo de ajustes (#34): porcentaje que se aplica a todos los brillos de abajo
@@ -42,6 +46,18 @@ inline uint8_t dimStageFor(uint32_t idleMs) {
   return idleMs > POWER_DIM2_MS ? DIM_OFF : idleMs > POWER_DIM1_MS ? DIM_LOW : DIM_AWAKE;
 }
 
+// offMs == 0 keeps the historical schedule so the host tests stay valid.
+inline uint8_t dimStageNow(const PowerCtx &c) {
+  if (!c.offMs) return dimStageFor(c.idleMs);
+  if (c.idleMs >= c.offMs) return DIM_OFF;
+  if (c.idleMs >= c.offMs / 2) return DIM_LOW;
+  return DIM_AWAKE;
+}
+
+inline bool autoScreenOff(const PowerCtx &c) {
+  return c.offMs && !c.gameOpen && c.idleMs >= c.offMs;
+}
+
 // bateria baja: se ahorra mas (solo si de verdad depende de la bateria)
 inline bool batteryLow(const PowerCtx &c) { return c.batPct >= 0 && c.batPct < 20 && !c.charging && !c.usb; }
 inline bool batteryCritical(const PowerCtx &c) { return c.batPct >= 0 && c.batPct < 10 && !c.charging && !c.usb; }
@@ -50,7 +66,7 @@ inline bool batteryCritical(const PowerCtx &c) { return c.batPct >= 0 && c.batPc
 // por el nivel elegido en ajustes
 inline uint8_t brightnessFor(const PowerCtx &c) {
   if (c.screenOff) return 0;
-  uint8_t stage = dimStageFor(c.idleMs);
+  uint8_t stage = dimStageNow(c);
   uint8_t t = c.sleeping ? 25 : (c.usb ? 180 : 145);
   if (stage == DIM_LOW) t = c.sleeping ? 10 : 60;
   else if (stage == DIM_OFF) t = 8;
@@ -67,9 +83,10 @@ inline uint8_t brightnessFor(const PowerCtx &c) {
 // completo y el volcado del lienzo por QSPI, y el panel solo cambia si se redibuja.
 inline uint32_t frameIntervalMs(const PowerCtx &c) {
   if (c.screenOff) return 0;
+  if (c.fullFps) return c.gameOpen ? 85 : 100;
   if (c.gameOpen) return 85;  // el juego manda: su fisica esta afinada a este periodo
   uint32_t ms;
-  uint8_t stage = dimStageFor(c.idleMs);
+  uint8_t stage = dimStageNow(c);
   if (stage == DIM_OFF) ms = 1000;
   else if (c.sleeping && c.idleMs > POWER_CALM_MS) ms = 500;  // dormido y sin tocar: casi nada se mueve
   else if (stage == DIM_LOW) ms = 250;
@@ -81,7 +98,7 @@ inline uint32_t frameIntervalMs(const PowerCtx &c) {
 // el amplificador del altavoz consume en reposo: solo se tiene encendido mientras
 // alguien puede estar jugando
 inline bool amplifierWanted(const PowerCtx &c) {
-  return !c.screenOff && !c.sleeping && dimStageFor(c.idleMs) == DIM_AWAKE;
+  return !c.screenOff && !c.sleeping && dimStageNow(c) == DIM_AWAKE;
 }
 
 // pausa del bucle principal en un pase que no dibuja
@@ -90,11 +107,20 @@ inline uint32_t idleDelayMs(const PowerCtx &c) { return c.screenOff ? 20 : 1; }
 // con la pantalla apagada, o casi apagada (5 min sin tocar), y sin USB se duerme la CPU (light
 // sleep) entre frames y sondeos; con USB no: se perderia el puerto serie de la tarjeta SD
 inline bool lightSleepAllowed(const PowerCtx &c) {
-  return !c.usb && (c.screenOff || dimStageFor(c.idleMs) == DIM_OFF);
+  return !c.noSleep && !c.usb && (c.screenOff || dimStageNow(c) == DIM_OFF);
+}
+
+// 240 MHz while playing, 160 while dimmed, 80 with the panel off. USB stays at 240.
+inline uint32_t cpuMhzFor(const PowerCtx &c) {
+  if (!c.cpuScale || c.usb || c.gameOpen) return 240;
+  uint8_t stage = dimStageNow(c);
+  if (c.screenOff || stage == DIM_OFF) return 80;
+  if (stage == DIM_LOW || c.sleeping) return 160;
+  return 240;
 }
 #define POWER_SLEEP_MS 200  // duracion de cada sueno; el toque despierta antes
 
 // cada cuanto se lee la bateria por I2C
 inline uint32_t powerCacheMs(const PowerCtx &c) {
-  return (c.screenOff || dimStageFor(c.idleMs) == DIM_OFF) ? 10000 : 2000;
+  return (c.screenOff || dimStageNow(c) == DIM_OFF) ? 10000 : 2000;
 }
