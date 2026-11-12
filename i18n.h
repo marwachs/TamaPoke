@@ -10,7 +10,14 @@ enum Lang : uint8_t { LANG_ES = 0, LANG_EN, LANG_FR, LANG_DE, LANG_IT, LANG_PT,
                      LANG_JA, LANG_KO, LANG_COUNT };
 // idiomas que necesitan una fuente U8g2 y texto UTF-8 en vez de la tabla CP437
 #define LANG_IS_CJK(l) ((l) == LANG_JA || (l) == LANG_KO)
-#define LANG_DEFAULT LANG_EN  // idioma por defecto: ingles
+#include "board.h"
+// Upstream default stays English. This integration image boots the 1.75C in
+// German; the clock-screen language pill still cycles all eight languages.
+#if BOARD_AMOLED_175C
+#define LANG_DEFAULT LANG_DE
+#else
+#define LANG_DEFAULT LANG_EN
+#endif
 
 extern Lang gLang;  // idioma activo (definido en i18n.cpp)
 
