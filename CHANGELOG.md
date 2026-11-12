@@ -28,8 +28,10 @@ Updating from the [web installer](https://socquique.github.io/TamaPoke/web/)
   heap, PSRAM, stack watermark, battery and frame rate. Charge and VBUS edges
   are logged. Tap the version line on the clock screen to turn the runtime log
   off (saved). Build with `-DTAMAPOKE_LOG=0` to strip it. A truncated sprite
-  no longer indexes off the end of its palette, and the loop task pats the
-  watchdog each pass.
+  no longer indexes off the end of its palette. The loop does not call
+  `esp_task_wdt_reset()`: Arduino leaves the loop task unsubscribed, so that
+  call only logged `task not found` on every pass. The idle-task watchdog
+  stays as the core configured it.
 - **Power saving, on the clock screen.** A row under the sound/brightness/language
   pills cycles the screen-off timeout (15 / 30 / 60 s / never, default 60 s; the
   panel dims at half that), idle frame-rate cut, light sleep, CPU scaling

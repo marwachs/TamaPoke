@@ -17,7 +17,6 @@ void diagSetRuntime(bool on);
 
 void diagError(const char *msg);
 void diagInfo(const char *msg);
-void diagFeedWdt();
 void diagNoteFrame();
 
 struct DiagBeat {

@@ -503,7 +503,6 @@ void ensureMon() {
 }
 
 void loop() {
-  diagFeedWdt();
   batLogIrqs();
   uint32_t now = millis();
   pet.update(now);
