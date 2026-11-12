@@ -8,6 +8,13 @@ Updating from the [web installer](https://socquique.github.io/TamaPoke/web/)
 
 ## [Unreleased]
 
+### Fixed
+
+- **1.75C PWR button.** Key2 is only on AXP2101 PWRON. GPIO3 (net SYS_OUT) does
+  not follow it, so short and triple presses did nothing. A short press is now
+  the PKEY short-press IRQ, polled and cleared over I2C, and toggles the screen.
+  Holding PWR for 4 s is still the hardware power-off.
+
 ### Added
 
 - **Waveshare ESP32-S3-Touch-AMOLED-1.75C** (experimental community support):

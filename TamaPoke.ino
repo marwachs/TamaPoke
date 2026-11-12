@@ -286,6 +286,30 @@ void pollBootButton() {
 // Poll every loop (not the old 250 ms PMU poll, which misses quick presses).
 void pollPwrButton() {
 #if BOARD_AMOLED_175C
+  // PWR is the AXP2101 PKEY. GPIO3 does not change when the key is pressed.
+  static uint32_t lastPwr = 0;
+  uint32_t nowPwr = millis();
+  if (nowPwr - lastPwr >= 40) {
+    lastPwr = nowPwr;
+    if (pwrShortPressed()) {
+      Serial.printf("PWR short (AXP PKEY) gpio3=%d\n", digitalRead(PWR_SENSE_PIN));
+      if (screenLock.locked()) {
+        screenLock.toggle();
+        if (panelSleeping) {
+          panel->displayOn();
+          panelSleeping = false;
+        }
+        pinMode(TP_INT, INPUT_PULLUP);
+        attachInterrupt(digitalPinToInterrupt(TP_INT), touchIsr, FALLING);
+        screenOff = false;
+        wakeUI();
+        showControlToast("Unlocked");
+      } else {
+        screenOff = !screenOff;
+        if (!screenOff) wakeUI();
+      }
+    }
+  }
   if (!pwrButton.update(digitalRead(PWR_SENSE_PIN) == PWR_SENSE_PRESSED, millis())) return;
   bool locked = screenLock.toggle();
   // Discard both a partly-entered BOOT gesture and a finger already on the glass.
@@ -425,7 +449,8 @@ void setup() {
   pinMode(BOOT_BUTTON_PIN, INPUT_PULLUP);
   bootButton.begin(digitalRead(BOOT_BUTTON_PIN) == LOW, millis());
   pwrButton.begin(digitalRead(PWR_SENSE_PIN) == PWR_SENSE_PRESSED, millis());
-  Serial.println("PWR GPIO3 active high: triple=lock/unlock gap=350ms tap<600ms debounce=25ms; hold 4s=hardware off");
+  Serial.printf("PWR: AXP2101 PKEY short IRQ (screen on/off), hold 4s = power off; GPIO3=%d (not the key)\n",
+                digitalRead(PWR_SENSE_PIN));
   Serial.println("BOOT GPIO0 ready: debounce=25ms single=mute");
   trainingCaptureReady = touchOk && trainingCapture.begin(readTrainingTouch);
   if (!trainingCaptureReady) Serial.println("Strength training: touch capture unavailable");
