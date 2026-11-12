@@ -10,6 +10,14 @@ Updating from the [web installer](https://socquique.github.io/TamaPoke/web/)
 
 ### Added
 
+- **Debug log.** Boot prints the reset reason, a boot counter, and any core dump
+  left in the `coredump` partition (kept in flash). A 10 s heartbeat reports
+  heap, PSRAM, stack watermark, battery and frame rate. Charge and VBUS edges
+  are logged. Tap the version line on the clock screen to turn the runtime log
+  off (saved). Build with `-DTAMAPOKE_LOG=0` to strip it. A truncated sprite
+  no longer indexes off the end of its palette, and the loop task pats the
+  watchdog each pass.
+
 - **Waveshare ESP32-S3-Touch-AMOLED-1.75C** (experimental community support):
   build with `tools/build_175c.sh` (`-DBOARD_AMOLED_175C=1` plus
   `boards/175c/partitions.csv`). Sprites come from a LittleFS partition in flash
