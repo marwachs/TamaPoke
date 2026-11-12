@@ -32,6 +32,17 @@ static QueueHandle_t gQ = nullptr;
 // arranque (440 ms) se oia y los pitidos de 35 ms no. Se deja encendido mientras
 // haya sonido y la mascota este despierta, como en el ejemplo verificado de
 // Waveshare, y solo se apaga al dormir o al silenciar.
+static bool esW(uint8_t reg, uint8_t val);
+static void codecPower(bool on) {
+  // ES8311 system power (reg 0x0D). PA is gated separately. Muted = both off.
+  if (on) {
+    esW(0x0D, 0xFA);
+    esW(0x44, 0x58);
+  } else {
+    esW(0x0D, 0x00);
+  }
+}
+
 static void updateAmplifierPower() {
   // gReady evita encenderlo en una placa donde el codec no arranco: ahi el
   // amplificador solo aportaria siseo, porque no va a sonar nada.
@@ -181,6 +192,7 @@ void audioBegin() {
   p.end();
 
   gReady = true;
+  if (!gOn) codecPower(false);
   updateAmplifierPower();
   gQ = xQueueCreate(8, sizeof(uint8_t));
   xTaskCreatePinnedToCore(audioTask, "audio", 4096, nullptr, 1, nullptr, 0);
@@ -202,6 +214,7 @@ void sfxPlay(uint8_t id) {
 
 void audioSetEnabled(bool on) {
   gOn = on;
+  if (gReady) codecPower(on);
   updateAmplifierPower();
   Preferences p;
   p.begin("tamapoke", false);

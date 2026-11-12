@@ -10,6 +10,13 @@ Updating from the [web installer](https://socquique.github.io/TamaPoke/web/)
 
 ### Added
 
+- **Power saving, on the clock screen.** A row under the sound/brightness/language
+  pills cycles the screen-off timeout (15 / 30 / 60 s / never, default 60 s; the
+  panel dims at half that), idle frame-rate cut, light sleep, CPU scaling
+  (240 / 160 / 80 MHz) and raise-to-wake on the QMI8658. Wi-Fi and Bluetooth
+  stay off. Muting the speaker also powers down the ES8311. Defaults favour
+  battery; USB keeps the CPU at 240 MHz so the serial link stays up.
+
 - **Waveshare ESP32-S3-Touch-AMOLED-1.75C** (experimental community support):
   build with `tools/build_175c.sh` (`-DBOARD_AMOLED_175C=1` plus
   `boards/175c/partitions.csv`). Sprites come from a LittleFS partition in flash
