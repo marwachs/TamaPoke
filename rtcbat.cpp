@@ -11,13 +11,36 @@ static XPowersPMU pmu;
 static bool rtcOk = false;
 static bool pmuOk = false;
 
+#if BOARD_AMOLED_175C
+// The 1.75C has no PCF85063. Keep a software clock (time()/settimeofday) so the
+// clock screen and the scene hour still work; it is lost when the AXP cuts
+// power, like the original board when its RTC loses backup power.
+#include <sys/time.h>
+static const uint32_t kSoftMinEpoch = 1735689600UL;  // 2025-01-01: below = no time
+static uint32_t softEpoch() {
+  time_t now = time(nullptr);
+  return now < (time_t)kSoftMinEpoch ? 0 : (uint32_t)now;
+}
+static void softSetEpoch(uint32_t e) {
+  if (e < kSoftMinEpoch) return;
+  struct timeval tv = { (time_t)e, 0 };
+  settimeofday(&tv, nullptr);
+}
+#endif
+
 bool rtcBegin() {
+#if BOARD_AMOLED_175C
+  return false;  // no PCF85063 on this board: software clock only
+#endif
   rtcOk = rtc.begin(Wire, IIC_SDA, IIC_SCL);
   if (!rtcOk) Serial.println("PCF85063 no detectado");
   return rtcOk;
 }
 
 uint32_t rtcEpoch() {
+#if BOARD_AMOLED_175C
+  return softEpoch();
+#endif
   if (!rtcOk) return 0;
   RTC_DateTime t = rtc.getDateTime();
   if (t.getYear() < 2025 || t.getYear() > 2120) return 0;  // sin hora valida
@@ -33,6 +56,10 @@ uint32_t rtcEpoch() {
 }
 
 void rtcSetEpoch(uint32_t e) {
+#if BOARD_AMOLED_175C
+  softSetEpoch(e);
+  return;
+#endif
   if (!rtcOk) return;
   time_t tt = e;
   struct tm tmv;
@@ -44,22 +71,51 @@ void rtcSetEpoch(uint32_t e) {
 bool batBegin() {
   pmuOk = pmu.begin(Wire, AXP2101_SLAVE_ADDRESS, IIC_SDA, IIC_SCL);
   if (!pmuOk) { Serial.println("AXP2101 no detectado"); return false; }
+  pmu.enableBattDetection();
   pmu.enableBattVoltageMeasure();
+  pmu.enableVbusVoltageMeasure();
   pmu.setSysPowerDownVoltage(BAT_HW_CUTOFF_MV);  // respaldo: el PMU corta solo si el firmware no llega a tiempo
+  // Celda LiPo de una celda a 4,20 V, como asume batcurve.h y como configura el
+  // ejemplo oficial de Waveshare para la 1.75C (pre 50 mA, CC 400 mA, corte 25 mA).
+  // 400 mA es ~0,36 C de la LiPo de 1100 mAh del README. El limite de entrada USB
+  // se deja en 500 mA (lo que un puerto USB 2.0 entrega sin negociar mas): si la
+  // pantalla pide mas, el PMU baja la corriente de carga, no la sube por encima.
+  // Hay que escribirlo: tras un drenaje total el AXP vuelve a sus valores de
+  // fabrica, y el firmware anterior no los reponia.
+  pmu.enableCellbatteryCharge();
+  pmu.setPrechargeCurr(XPOWERS_AXP2101_PRECHARGE_50MA);
+  if (!pmu.setChargerConstantCurr(XPOWERS_AXP2101_CHG_CUR_400MA))
+    Serial.println("AXP2101: no se pudo fijar la corriente de carga");
+  pmu.setChargerTerminationCurr(XPOWERS_AXP2101_CHG_ITERM_25MA);
+  pmu.enableChargerTerminationLimit();
+  if (!pmu.setChargeTargetVoltage(XPOWERS_AXP2101_CHG_VOL_4V2))
+    Serial.println("AXP2101: no se pudo fijar 4.20 V");
+  pmu.setVbusCurrentLimit(XPOWERS_AXP2101_VBUS_CUR_LIM_500MA);
+  // El gauge del AXP2101 sale habilitado de fabrica (XPowersLib 0.3 ya no
+  // expone enableGauge). Mientras hay USB o esta cargando se usa su porcentaje.
+  pmu.setChargingLedMode(XPOWERS_CHG_LED_CTRL_CHG);
+  Serial.println("AXP2101 LiPo: carga ON, 4.20 V, 400 mA, pre 50 mA, corte 25 mA, VBUS 500 mA");
   return true;
 }
 
-// Enciende la alimentacion de la AMOLED. En la Waveshare 1.75 el panel (OLED VDD)
-// cuelga del rail BLDO1 a 3.3V del AXP2101. El firmware daba por hecho que estaba
-// encendido; si el PMU se resetea (drenaje total), BLDO1 queda OFF y la pantalla
-// se ve negra aunque el resto funcione. Hay que llamarla ANTES de gfx->begin().
+// Enciende la alimentacion de la AMOLED. Hay que llamarla ANTES de gfx->begin().
+// 1.75: el panel (OLED VDD) cuelga del rail BLDO1 a 3.3V del AXP2101. Si el PMU
+// se resetea (drenaje total), BLDO1 queda OFF y la pantalla se ve negra.
+// 1.75C: el conector J3 del panel se alimenta de VCC3V3 (AXP DCDC1), que ya esta
+// encendido cuando arranca el ESP32. BLDO1 en esa placa es 1.2V y BLDO2 es 2.8V
+// — no hay que reprogramarlos a 3.3V.
 void pmuEnablePanel() {
   if (!pmu.begin(Wire, AXP2101_SLAVE_ADDRESS, IIC_SDA, IIC_SCL)) {
     Serial.println("AXP2101 no detectado (pmuEnablePanel)");
     return;
   }
+#if BOARD_AMOLED_175C
+  // Panel on VCC3V3 (DCDC1). Leave the AXP LDO voltages at board defaults.
+  (void)0;
+#else
   pmu.setBLDO1Voltage(3300);   // OLED VDD
   pmu.enableBLDO1();
+#endif
 }
 
 // el estado de energia (I2C) se cachea ~2 s: leerlo en cada frame del loop
@@ -106,17 +162,34 @@ bool usbPresent() { refreshPower(); return cachedUsb; }
 bool usbPresentNow() { return pmuOk ? pmu.isVbusIn() : true; }
 
 void pwrSetup() {
+#if BOARD_AMOLED_175C
+  if (pmuOk) {
+    // AXP2101 register 0x27 bits [3:2] = 00: keep the 4 s hardware power-off.
+    // No PEK IRQ here: the triple press is read raw from GPIO3 (screenlock.h).
+    if (!pmu.setPowerKeyPressOffTime(XPOWERS_POWEROFF_4S))
+      Serial.println("PWR: could not set AXP 4s shutdown; check PMU");
+    pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
+    pmu.clearIrqStatus();
+  }
+  // SYS_OUT is already pulled up on the board (R9). High = PWR held.
+  pinMode(PWR_SENSE_PIN, INPUT);
+#else
   if (!pmuOk) return;
   pmu.setPowerKeyPressOffTime(XPOWERS_POWEROFF_4S);
   pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
   pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ);
   pmu.clearIrqStatus();
+#endif
 }
 
 bool pwrShortPressed() {
+#if BOARD_AMOLED_175C
+  return false;  // raw GPIO3 goes to PwrButton in the sketch (triple press)
+#else
   if (!pmuOk) return false;
   pmu.getIrqStatus();
   bool hit = pmu.isPekeyShortPressIrq();
   if (hit) pmu.clearIrqStatus();
   return hit;
+#endif
 }

@@ -42,7 +42,7 @@ A quick reference to how the game really works (values straight from the code).
 - **1 real minute = 1 in-game minute.** Your Pokémon gains **+1 level every hour**
   of real time. Leveling is purely time-based — caring well doesn't speed it up,
   but neglect *delays evolution*.
-- It keeps **aging while powered off** (the RTC runs), catching up to **2 weeks** max.
+- It keeps **aging while powered off** on the original 1.75 (the RTC runs), catching up to **2 weeks** max. The 1.75C has no RTC: a full power-off freezes the clock at the last saved minute and the next boot continues from there, so time never jumps backwards. Screen-off and the pocket lock do **not** stop the clock. The rates below are the same on both boards.
 
 ### The four stats (0–100)
 Needs: **FOOD**, **JOY**, **ENE** (energy), **HYG** (hygiene). Start 80 / 80 / 80 / 100.
@@ -125,14 +125,18 @@ SPEED ← minigame, DEFENSE ← 12 h of unbroken good care). *(Battles: on the r
 
 - Board: [ESP32-S3-Touch-AMOLED-1.75](https://www.waveshare.com/wiki/ESP32-S3-Touch-AMOLED-1.75)
   — get the **Standard** (no case) or **-G** (GPS, also fits) version; **not the "-B"**
-  (ships with a protective case that won't fit). The separate "1.75**C**" is a different board.
+  (ships with a protective case that won't fit). The separate "1.75**C**" is a different board; this tree builds for it too (see below).
   - **Where to buy**: [Waveshare store](https://www.waveshare.com/esp32-s3-touch-amoled-1.75.htm) (often on backorder), or the **-G** on Amazon — TamaPoke leaves the GPS unused, the board is otherwise identical: 🇺🇸 [.com](https://www.amazon.com/dp/B0F7XWWMJW?tag=capsuleradar-20) · 🇪🇸 [.es](https://www.amazon.es/dp/B0F7XWWMJW?tag=capsuleradar-21) · 🇩🇪 [.de](https://www.amazon.de/dp/B0F7XWWMJW?tag=capsulerada03-21) · 🇬🇧 [.co.uk](https://www.amazon.co.uk/dp/B0F7XWWMJW?tag=capsulerada0d-21) · 🇮🇹 [.it](https://www.amazon.it/dp/B0F7XWWMJW?tag=capsulerada08-21) · 🇫🇷 [.fr](https://www.amazon.fr/dp/B0F7XWWMJW?tag=capsulerada0e-21) · 🇯🇵 [.co.jp](https://www.amazon.co.jp/dp/B0F7XWWMJW?tag=capsuleradar-22) · 🇨🇦 [.ca](https://www.amazon.ca/dp/B0F7XWWMJW?tag=capsulerada09-20). Optional battery — 1100 mAh protected LiPo, MX1.25 plug: 🇪🇸 [.es](https://www.amazon.es/dp/B0F1FGZQS5?tag=capsuleradar-21) · 🇺🇸 [.com](https://www.amazon.com/dp/B0F1FGZQS5?tag=capsuleradar-20) · 🇮🇹 [.it](https://www.amazon.it/dp/B0F1FGZQS5?tag=capsulerada08-21) · 🇫🇷 [.fr](https://www.amazon.fr/dp/B0F1FGZQS5?tag=capsulerada0e-21) (DE/UK: that exact pack is not listed — search for a *protected* 3.7 V LiPo, ~1100 mAh, size **102540**, 1.25 mm micro-JST plug) — check plug polarity against the board first. <sub>Amazon links are affiliate links; as an Amazon Associate I earn from qualifying purchases.</sub>
   - **MicroSD card** (holds the sprite set — any small, class-10 card works): 🇪🇸 [.es](https://www.amazon.es/s?k=microsd+32gb&tag=capsuleradar-21) · 🇺🇸 [.com](https://www.amazon.com/s?k=microsd+32gb&tag=capsuleradar-20) · 🇩🇪 [.de](https://www.amazon.de/s?k=microsd+32gb&tag=capsulerada03-21) · 🇬🇧 [.co.uk](https://www.amazon.co.uk/s?k=microsd+32gb&tag=capsulerada0d-21) · 🇮🇹 [.it](https://www.amazon.it/s?k=microsd+32gb&tag=capsulerada08-21) · 🇫🇷 [.fr](https://www.amazon.fr/s?k=microsd+32gb&tag=capsulerada0e-21) · 🇯🇵 [.co.jp](https://www.amazon.co.jp/s?k=microsd+32gb&tag=capsuleradar-22) · 🇨🇦 [.ca](https://www.amazon.ca/s?k=microsd+32gb&tag=capsulerada09-20)
 - Round 466×466 AMOLED, **CO5300** driver (QSPI, 80 MHz)
 - Capacitive touch **CST9217** (I2C, address 0x5A)
 - **AXP2101** (power management + battery + PWR button), **PCF85063** (RTC),
   microSD slot, **ES8311** audio codec (→ amplifier → external speaker on the
-  MX1.25 connector)
+  MX1.25 connector). On boot the PMU is set for a single-cell LiPo: charging
+  enabled, **4.20 V**, **400 mA** constant current, 50 mA precharge, 25 mA
+  termination, USB input limited to **500 mA**. The header shows the percent
+  (a leading `+` while charging) next to the battery icon. Under 3.30 V for
+  30 s on battery the pet is saved and the PMU switches off.
 - Pins taken from the [official Waveshare repo](https://github.com/waveshareteam/ESP32-S3-Touch-AMOLED-1.75) (see `pin_config.h`)
 
 ## Libraries (Arduino IDE / arduino-cli)
@@ -157,6 +161,27 @@ FQBN="esp32:esp32:esp32s3:CDCOnBoot=cdc,FlashSize=16M,PSRAM=opi,PartitionScheme=
 arduino-cli compile --fqbn "$FQBN" .
 arduino-cli upload -p /dev/cu.usbmodemXXXX --fqbn "$FQBN" .
 ```
+
+### Alternative board: Waveshare ESP32-S3-Touch-AMOLED-1.75C (experimental)
+
+The firmware also targets the **ESP32-S3-Touch-AMOLED-1.75C** (same 466×466
+CO5300 panel and CST9217 touch, aluminium case, 32 MB flash, **no microSD** and
+no PCF85063 RTC). Select it with a build flag and its own partition table;
+the script does both:
+
+```bash
+tools/build_175c.sh --out ./out          # -DBOARD_AMOLED_175C=1 + boards/175c/partitions.csv
+tools/build_spritefs.sh ./out/storage.littlefs.bin
+tools/flash_175c.sh --port /dev/ttyACM0 --out ./out
+```
+
+Sprites live in a LittleFS partition in flash (151 normal forms; shinies fall
+back to the normal sprite), the clock is a software clock set from the clock
+screen, and the 1.75C adds a short-press screen toggle plus a triple-PWR pocket
+screen lock, BOOT-button mute and more reliable strength-training taps. The
+AXP2101 charge profile above is the same on this board (panel power stays on
+DCDC1; BLDO1 is not retargeted to 3.3 V). The default build is still the
+original 1.75. Details, pins and flashing in [`PORTING.md`](PORTING.md).
 
 ### Easiest install: the web installer
 
@@ -214,7 +239,9 @@ If one bottoms out it counts as a *slip-up*.
 - Long press (3 s) on the creature = **release** dialog.
 
 **Physical PWR button:** short = screen on/off · long (4 s) = full power-off
-(the RTC stays alive, so time passes even while it's off).
+(on the original 1.75 the RTC stays alive, so time passes even while it's off;
+on the 1.75C a full power-off freezes the clock, see the manual above). On the
+1.75C, three quick presses lock the screen and touch, and three more unlock it.
 
 ## Decisions: you choose, and you watch
 

@@ -6,6 +6,25 @@ bottom of the clock/settings screen (swipe down) and `web/manifest.json`.
 Updating from the [web installer](https://socquique.github.io/TamaPoke/web/)
 **without** ticking "Erase device" keeps your Pokémon.
 
+## [Unreleased]
+
+### Added
+
+- **Waveshare ESP32-S3-Touch-AMOLED-1.75C** (experimental community support):
+  build with `tools/build_175c.sh` (`-DBOARD_AMOLED_175C=1` plus
+  `boards/175c/partitions.csv`). Sprites come from a LittleFS partition in flash
+  instead of the microSD slot it doesn't have, and time comes from a software
+  clock (no PCF85063). 1.75C only: a short PWR press still toggles the screen,
+  three quick presses lock the screen and touch for a pocket (hold 4 s still
+  powers off), BOOT toggles sound, and strength training counts taps anywhere
+  on the screen with a 1-second "Hold to exit" button. The default build is
+  still the original 1.75. See `PORTING.md`.
+- **LiPo charge profile on the AXP2101** (both boards). Charging is enabled at
+  4.20 V / 400 mA (50 mA precharge, 25 mA termination, 500 mA USB input limit),
+  matching Waveshare's 1.75C power example and the 4.2 V cell `batcurve.h`
+  already assumes. The header shows the percent as well as the icon, including
+  while the bolt is drawn.
+
 ## [1.18] - 2026-10-27
 
 Three contributions from **ViezeVingertjes** (PRs #25, #26 and #27), merged together.
